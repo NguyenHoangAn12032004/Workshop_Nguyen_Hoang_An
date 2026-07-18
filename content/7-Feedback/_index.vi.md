@@ -7,8 +7,6 @@ pre: " <b> 7. </b> "
 ---
 
 
-# Chia sẻ và đóng góp ý kiến
-
 ## Phản hồi về chương trình thực tập FCAJ
 
 ### Những điều tôi thích

@@ -6,8 +6,6 @@ chapter: false
 pre: " <b> 1. </b> "
 ---
 
-# Worklog
-
 This worklog documents 12 weeks of my internship at the **Bootcamp First Cloud AI Journey** program, from **17/04/2026 to 10/07/2026**. During this period, I progressed from learning foundational AWS services to building and deploying a full-stack IELTS/TOEIC preparation platform (**LingoRise**) using AWS serverless architecture.
 
 **Week 1:** [AWS Foundations — EC2, VPC, DRS & SAM](1.1-week1/)

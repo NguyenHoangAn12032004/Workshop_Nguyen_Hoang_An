@@ -7,8 +7,6 @@ pre: " <b> 7. </b> "
 ---
 
 
-# Sharing and Feedback
-
 ## Feedback on the FCAJ Internship Program
 
 ### What I Liked
