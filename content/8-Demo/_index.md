@@ -19,7 +19,7 @@ Watch the walkthrough demonstration of LingoRise below. You can play it full-scr
 <div class="demo-video-container">
   <!-- Replace FILE_ID_HERE with your actual Google Drive video file ID -->
   <iframe 
-    src="https://drive.google.com/file/d/1ri3cTnkdFDWMQzkPT5GPy4sHZ61EXpi2/view?usp=sharing" 
+    src="https://drive.google.com/file/d/1ri3cTnkdFDWMQzkPT5GPy4sHZ61EXpi2/preview" 
     width="100%" 
     height="480" 
     allow="autoplay; encrypted-media" 
