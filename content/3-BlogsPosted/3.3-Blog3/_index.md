@@ -1,14 +1,14 @@
 ---
-title: "Blog 3: Disaster Recovery with FSx ONTAP"
+title: "Blog 3: Scaling to 121M gRPC Connections"
 date: 2026-07-19
 weight: 3
 chapter: false
 pre: " <b> 3.3. </b> "
-description: "How S&P Global leverages Amazon FSx for NetApp ONTAP to build a zero-copy, highly efficient disaster recovery and backup replication architecture."
-tags: ["AWS", "Storage", "FSx ONTAP", "Disaster Recovery", "Databases"]
+description: "How bitdrift leveraged Amazon CloudFront and Route 53 to scale telemetry systems to 121 million concurrent gRPC connections during live sporting events."
+tags: ["AWS", "Networking", "gRPC", "CloudFront", "Route 53", "Scaling"]
 ---
 
-# S&P Global’s Innovative Disaster Recovery Strategy Using Amazon FSx for NetApp ONTAP
+# How Bitdrift Scaled to 121 Million Concurrent gRPC Connections on Amazon CloudFront
 
 *This post shares my technical insights and reflections as a student intern in the **AWS First Cloud AI Journey** program, diving into a massive real-world serverless architecture solution.*
 
@@ -16,73 +16,71 @@ tags: ["AWS", "Storage", "FSx ONTAP", "Disaster Recovery", "Databases"]
 
 ## 📌 The Journey Begins
 
-Before starting my internship at the **AWS First Cloud AI Journey**, I thought backup and disaster recovery (DR) was simple: just copy files to an S3 bucket or make database snapshots every night. But in the financial sector, where companies like **S&P Global** process critical global credit ratings, every second of downtime costs millions of dollars. They need a system that can recover multi-terabyte databases in minutes, not hours, and they must test their DR procedures constantly. Learning about S&P Global's DR architecture was like reading a sci-fi novel about data manipulation. It's incredibly exciting to see how storage virtualization can create instant, zero-copy databases on demand!
+Imagine you are watching a live football game with millions of other fans, and your app receives real-time telemetry updates every second. Behind the scenes, the engineering complexity is mind-boggling. When I read about **121 million concurrent gRPC connections** handled on AWS, my jaw dropped. As a cloud student, I have set up simple HTTP servers, but scaling long-lived, bi-directional gRPC connections to over a hundred million concurrent users is an entirely different league. This architecture post from AWS shows how clever routing and CDN designs can conquer extreme traffic peaks.
 
 ---
 
 ## 🏛️ Original Architecture Deep-Dive
 
-S&P Global sought to modernize the disaster recovery and database cloning pipelines for their core applications, which rely heavily on relational databases (Oracle, PostgreSQL, Microsoft SQL Server) and enterprise shared storage.
+The original post explores how **bitdrift**, a live mobile telemetry platform, designed its infrastructure to ingest telemetry data from millions of mobile devices simultaneously during high-traffic sporting events.
 
 ### Context & Challenges
-For massive enterprise databases:
-* **Storage Size Bottlenecks:** Restoring a 10TB database from standard backups takes hours, which violates strict regulatory Recovery Time Objectives (RTO).
-* **Testing Disruptions:** Standard DR testing requires pausing replication or copying massive amounts of data, which degrades production performance and incurs huge storage costs.
-* **Storage Overhead:** Creating multiple test environments or database copies for QA teams multiplies storage bills exponentially.
+Traditional HTTP APIs are stateless and short-lived. Telemetry systems, however, rely on **gRPC over HTTP/2**, which uses persistent, long-lived TCP connections. 
+* **Connection Hotspotting:** If all clients resolve DNS to a single IP address, certain servers get overloaded while others remain idle.
+* **DNS Caching Bottlenecks:** Standard DNS caching prevents clients from dynamically redistributing their load.
+* **Pre-warming Overhead:** Scaling up traditional Application Load Balancers (ALBs) to handle sudden spikes of 100 million+ connections requires time-consuming pre-warming coordination with AWS support.
 
 ### Architectural Layout
-S&P Global designed an active-passive cross-region disaster recovery architecture utilizing:
-* **Amazon FSx for NetApp ONTAP:** Provides a fully managed NetApp ONTAP file system on AWS, supporting both NFS/SMB protocol shares and block-level iSCSI storage.
-* **ONTAP SnapMirror:** Replicates database volumes asynchronously from the primary AWS region to the secondary (DR) AWS region.
-* **NetApp FlexClone:** Creates instant, read-write copies of any volume snapshot in seconds, regardless of database size, without consuming additional storage.
+Bitdrift resolved these challenges by designing a hybrid edge-to-origin routing pipeline:
+* **Amazon CloudFront:** Terminates TLS at the AWS edge, reducing latency for clients worldwide. CloudFront also handles HTTP/2 connection reuse, acting as the front shield.
+* **Amazon Route 53 with Multi-Value Answer (MVA) Routing:** Resolves client requests by returning up to 8 randomized IP addresses from a pool of healthy targets, ensuring an even distribution of connections.
+* **Network Load Balancers (NLBs):** Handles millions of TCP packets per second and routes them directly to Envoy proxy fleets running on Amazon EKS.
+* **Envoy Proxies:** Acts as the internal gRPC router, balancing requests across telemetry storage engines.
 
-![S&P Global FSx ONTAP Disaster Recovery Architecture Diagram](/images/3-BlogsPosted/blog3-fsx-ontap-dr.jpeg)
+![Bitdrift gRPC Telemetry Ingestion Architecture Diagram](/images/3-BlogsPosted/blog2-grpc-scaling.png)
 
 ---
 
 ## 🛠️ Deep Academic Analysis & Technical Highlights
 
-To understand the recovery speed of S&P Global's system, we must examine the underlying storage virtualization mechanics of NetApp ONTAP:
+Understanding how bitdrift achieved this scale requires zooming into the networking protocols:
 
-### 1. Pointer-Based Snapshots and Metadata Mapping
-Traditional backups copy the physical bits of data from a source disk to a target location (e.g., from SSDs to S3 buckets). The time taken scales linearly with the size of the volume ($O(N)$).
-Amazon FSx for NetApp ONTAP uses **WAFL (Write Anywhere File Layout)**. When a snapshot is taken, ONTAP does not copy data. Instead, it creates a read-only copy of the active file system's metadata (pointers to data blocks) in a fraction of a second ($O(1)$ complexity). 
+### 1. HTTP/2 Multiplexing vs. HTTP/1.1 Persistent Connections
+In HTTP/1.1, concurrent requests require multiple separate TCP connections, creating severe connection overhead. HTTP/2 introduces **multiplexing**, allowing multiple requests and responses to be sent concurrently over a single TCP connection.
+gRPC relies on HTTP/2 streams. However, keeping millions of TCP connections open on backend application servers drains memory resources due to TCP socket buffers. 
+Offloading these connections to **Amazon CloudFront** Edge locations shifts the memory load of TLS/TCP state tracking to AWS's global edge network.
 
-### 2. SnapMirror Block-Level Logical Replication
-Unlike standard file-copy utilities that scan directories and transfer complete files, **ONTAP SnapMirror** replicates at the block level.
-1. During initialization, it performs a baseline transfer of active blocks.
-2. For subsequent updates, it identifies changed blocks between snapshots and transfers *only the modified disk blocks* asynchronously to the secondary region.
-This block-level incremental sync saves network bandwidth and guarantees a very low Recovery Point Objective (RPO).
+### 2. Route 53 Multi-Value Answer (MVA) vs. Round-Robin DNS
+Standard round-robin DNS returns a list of IP addresses in a static order. When a client caches the first IP, it sends all traffic there, leading to unbalanced traffic patterns.
+Route 53 **Multi-Value Answer (MVA)** routing returns up to 8 randomized, healthy IP addresses from a large pool of resource records. When combined with clientside random selection and a short DNS Time-to-Live (TTL = 60s), clients continuously shuffle their target IPs, resulting in a near-perfect distribution of connections across NLBs without relying on a centralized hardware bottleneck.
 
-### 3. NetApp FlexClone Zero-Copy Writeable Volumes
-In standard setups, a developer or tester who wants a copy of the database must copy the entire data volume.
-**NetApp FlexClone** allows creation of a writable volume from any existing snapshot instantly. The clone shares the exact same physical block storage pointers with the parent volume.
-* **No physical copying:** The clone creation is instantaneous (seconds), regardless of volume size.
-* **Storage efficiency:** The clone only consumes storage space for *new blocks* written after the clone is created (Copy-on-Write metadata tracking).
-This enables S&P Global to run non-disruptive DR drills and database testing cycles continuously.
+$$\text{Load Share per IP} \approx \frac{\text{Total Traffic}}{N_{\text{healthy records}}}$$
+
+### 3. NLB Pass-Through Architecture
+Traditional Application Load Balancers (ALBs) operate at Layer 7 (Application), parsing HTTP headers. This consumes significant CPU and memory, requiring pre-warming. Network Load Balancers (NLBs) operate at Layer 4 (Transport), routing raw TCP streams directly to the target EKS nodes. This allows the NLBs to handle millions of connections per second instantaneously.
 
 | Challenge | Solution | Key Learning |
 | :--- | :--- | :--- |
-| **High RTO on multi-TB databases** | Incremental block-level replication using **SnapMirror**. | Only replication of modified disk blocks is sent, avoiding full file transfers. |
-| **Disruptive DR testing** | Used **FlexClone** to spin up instant database clones in the DR region. | Clones point to the original snapshot blocks and only write new changes, requiring zero data duplication. |
-| **Testing without interrupting sync** | FlexClone creates clones while SnapMirror continues syncing in the background. | Decoupling replication streams from testing processes allows continuous data protection. |
-| **High storage costs for copies** | Deduplication and compression features of FSx ONTAP. | Thin-provisioning and zero-copy cloning keep storage overhead minimal. |
+| **TLS/TCP handshake storm** | Offloaded TLS termination to **Amazon CloudFront** edge locations. | Terminating SSL closer to the user drastically reduces latency and load on the origin server. |
+| **Uneven traffic distribution** | Utilized **Route 53 Multi-Value Answer (MVA)** returning 8 randomized IP addresses. | MVA routing is a simple but highly effective way to achieve clientside load balancing without a single point of failure. |
+| **Scaling load balancers** | Used **Network Load Balancers (NLBs)** instead of ALBs. | NLBs route TCP traffic directly without looking at HTTP layers, allowing them to handle millions of requests instantly with no pre-warming. |
+| **Persistent connection stickiness** | Configured Envoy to gracefully terminate connections after a maximum lifetime. | Recycling long-lived connections prevents single nodes from becoming permanent hotspots. |
 
 ---
 
 ## 💡 Reflection & Internship Lessons
 
-As a cloud student, this case study completely transformed my perspective on cloud storage.
+As a cloud student, this architecture taught me how critical the networking layer is to system scaling.
 
-Here are the key lessons I took away:
-1. **Zero-Copy is a Game Changer:** The idea that you can "clone" a 10-terabyte database in 3 seconds without copying a single byte of data is mind-blowing. NetApp's pointer-based metadata mapping is an absolute work of art.
-2. **DR Testing Must Be Continuous:** A disaster recovery plan is useless if you can't test it. S&P Global can spin up clones, run tests, and tear them down in minutes without affecting production replication.
-3. **Managed Services Make Complex Tech Easy:** NetApp ONTAP is notoriously complex to manage on-premises. Having it fully managed as Amazon FSx allows developers to focus on architecture rather than hardware maintenance.
+Here are my major takeaways:
+1. **CDNs are not just for static files:** Before reading this, I thought CloudFront was only for caching images and React scripts. Learning that CloudFront terminates TLS and proxies gRPC traffic at the edge was a revelation!
+2. **DNS as a Load Balancer:** Route 53's Multi-Value Answer is a brilliant mechanism. Instead of relying on a centralized load balancer that can bottleneck, we can let Route 53 distribute IPs and let clients load balance themselves.
+3. **The Importance of Connection Recycling:** In school, we are taught to keep connections alive for performance. But in massive distributed systems, keeping connections alive *forever* leads to load imbalance. Learning to periodically recycle connections is a counter-intuitive but essential lesson!
 
-This case study inspires me to think about storage not just as a place to put files, but as a dynamic component that can accelerate software delivery and protect critical business operations. I'm so proud to be learning AWS at a time when such powerful tools are available at our fingertips!
+Seeing this architecture succeed makes me incredibly eager to experiment with Route 53 and CloudFront in my own labs. It is a masterclass in elegant network design!
 
 ---
 
 ## 🔗 References
-* [Original AWS Architecture Blog: S&P Global’s innovative disaster recovery strategy using Amazon FSx for NetApp ONTAP snapshots](https://aws.amazon.com/blogs/architecture/sp-globals-innovative-disaster-recovery-strategy-using-amazon-fsx-for-netapp-ontap-snapshots/)
-* [What is Amazon FSx for NetApp ONTAP?](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/what-is-fsx-ontap.html)
+* [Original AWS Architecture Blog: How bitdrift scaled to 121 million concurrent gRPC connections](https://aws.amazon.com/blogs/architecture/how-bitdrift-scaled-to-121-million-concurrent-grpc-connections-on-amazon-cloudfront-for-live-telemetry-sporting-events/)
+* [Amazon Route 53 Developer Guide](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/welcome.html)

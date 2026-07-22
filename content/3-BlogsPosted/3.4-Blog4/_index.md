@@ -1,14 +1,14 @@
 ---
-title: "Blog 4: Modernizing Fraud Claims with EMR"
+title: "Blog 4: Disaster Recovery with FSx ONTAP"
 date: 2026-07-19
 weight: 4
 chapter: false
 pre: " <b> 3.4. </b> "
-description: "How MAPFRE USA built an automated, serverless big data pipeline with Amazon EMR Serverless and Apache Iceberg to modernize fraud detection."
-tags: ["AWS", "Big Data", "EMR Serverless", "Apache Iceberg", "Machine Learning"]
+description: "How S&P Global leverages Amazon FSx for NetApp ONTAP to build a zero-copy, highly efficient disaster recovery and backup replication architecture."
+tags: ["AWS", "Storage", "FSx ONTAP", "Disaster Recovery", "Databases"]
 ---
 
-# How MAPFRE USA Modernized Fraud Claims with Amazon EMR Serverless
+# S&P Global’s Innovative Disaster Recovery Strategy Using Amazon FSx for NetApp ONTAP
 
 *This post shares my technical insights and reflections as a student intern in the **AWS First Cloud AI Journey** program, diving into a massive real-world serverless architecture solution.*
 
@@ -16,83 +16,73 @@ tags: ["AWS", "Big Data", "EMR Serverless", "Apache Iceberg", "Machine Learning"
 
 ## 📌 The Journey Begins
 
-As an intern in the **AWS First Cloud AI Journey** program, I am always excited to see how Cloud Computing intersect with **Artificial Intelligence and Big Data**. In school, we learn about data processing in isolation—write a python script, run it on a CSV file, and train a model. But in the real world, insurance companies like **MAPFRE USA** have to scan millions of insurance claims, mapping complex networks of suspicious relationships (like shared phone numbers or vehicle registrations) to detect fraud rings in real-time. Discovering how MAPFRE USA combined serverless big data processing with graph databases and explainable AI was an absolute revelation. It's incredibly inspiring to see how these pieces fit together to protect honest customers and stop fraud!
+Before starting my internship at the **AWS First Cloud AI Journey**, I thought backup and disaster recovery (DR) was simple: just copy files to an S3 bucket or make database snapshots every night. But in the financial sector, where companies like **S&P Global** process critical global credit ratings, every second of downtime costs millions of dollars. They need a system that can recover multi-terabyte databases in minutes, not hours, and they must test their DR procedures constantly. Learning about S&P Global's DR architecture was like reading a sci-fi novel about data manipulation. It's incredibly exciting to see how storage virtualization can create instant, zero-copy databases on demand!
 
 ---
 
 ## 🏛️ Original Architecture Deep-Dive
 
-MAPFRE USA modernized its fraud detection platform by moving from on-premises legacy servers to an automated, cloud-native big data and AI pipeline on AWS.
+S&P Global sought to modernize the disaster recovery and database cloning pipelines for their core applications, which rely heavily on relational databases (Oracle, PostgreSQL, Microsoft SQL Server) and enterprise shared storage.
 
 ### Context & Challenges
-Detecting modern insurance fraud requires processing huge volumes of unstructured and structured data:
-* **Complex Data Relationships:** Traditional SQL databases struggle to model and query interconnected fraud rings (e.g., a network of claimants sharing the same lawyer, doctor, and phone number).
-* **Operational Overhead:** Managing on-premises Hadoop or Spark clusters for big data workloads required dedicated administration teams and led to wasted idle server costs.
-* **Explainability Deficit:** When machine learning models flag a claim as fraudulent, insurance investigators need clear, legal explanations of *why* it was flagged, not just a black-box score.
+For massive enterprise databases:
+* **Storage Size Bottlenecks:** Restoring a 10TB database from standard backups takes hours, which violates strict regulatory Recovery Time Objectives (RTO).
+* **Testing Disruptions:** Standard DR testing requires pausing replication or copying massive amounts of data, which degrades production performance and incurs huge storage costs.
+* **Storage Overhead:** Creating multiple test environments or database copies for QA teams multiplies storage bills exponentially.
 
 ### Architectural Layout
-MAPFRE USA implemented an end-to-end data lakehouse and ML pipeline composed of:
-* **Amazon S3 & Apache Iceberg:** Used as the core data lakehouse storage layer, allowing ACID transactions and schema evolution over millions of records.
-* **Amazon EMR Serverless (Apache Spark):** Processes large-scale ETL workloads, performs feature engineering, and runs model training jobs without managing any server infrastructure.
-* **Amazon MWAA (Managed Workflows for Apache Airflow):** Orchestrates the entire data pipeline from ingestion to scoring.
-* **Neo4j Graph Database:** Models relationships between claimants, vehicles, addresses, and phone numbers to visualize fraud rings.
-* **SageMaker & SHAP (SHapley Additive exPlanations):** Computes feature importance scores to explain ML decisions to human investigators.
+S&P Global designed an active-passive cross-region disaster recovery architecture utilizing:
+* **Amazon FSx for NetApp ONTAP:** Provides a fully managed NetApp ONTAP file system on AWS, supporting both NFS/SMB protocol shares and block-level iSCSI storage.
+* **ONTAP SnapMirror:** Replicates database volumes asynchronously from the primary AWS region to the secondary (DR) AWS region.
+* **NetApp FlexClone:** Creates instant, read-write copies of any volume snapshot in seconds, regardless of database size, without consuming additional storage.
 
-![MAPFRE USA Fraud Claims Modernization Architecture Diagram](/images/3-BlogsPosted/blog4-emr-serverless-fraud.png)
+![S&P Global FSx ONTAP Disaster Recovery Architecture Diagram](/images/3-BlogsPosted/blog3-fsx-ontap-dr.jpeg)
 
 ---
 
 ## 🛠️ Deep Academic Analysis & Technical Highlights
 
-To comprehend how MAPFRE USA operates this enterprise pipeline, we must inspect the integration points of the lakehouse format and machine learning:
+To understand the recovery speed of S&P Global's system, we must examine the underlying storage virtualization mechanics of NetApp ONTAP:
 
-### 1. Apache Iceberg Metadata Architecture on Amazon S3
-Standard data lakes organize data in folders on S3 and scan directories to query files. When a table has millions of rows, scanning directories degrades query performance significantly.
-**Apache Iceberg** solves this by using a hierarchical metadata tree:
-1. **Iceberg Catalog:** Points to the current Metadata File.
-2. **Metadata File:** Stores table schema details, partition definitions, and points to a list of Manifest Lists.
-3. **Manifest List:** Tracks snapshots of the table and links to individual Manifest Files.
-4. **Manifest File:** Identifies the actual parquet data files on S3.
-This architecture enables ACID transactions, fast partition pruning, and time travel queries, letting EMR Serverless Spark jobs read and write safely in parallel.
+### 1. Pointer-Based Snapshots and Metadata Mapping
+Traditional backups copy the physical bits of data from a source disk to a target location (e.g., from SSDs to S3 buckets). The time taken scales linearly with the size of the volume ($O(N)$).
+Amazon FSx for NetApp ONTAP uses **WAFL (Write Anywhere File Layout)**. When a snapshot is taken, ONTAP does not copy data. Instead, it creates a read-only copy of the active file system's metadata (pointers to data blocks) in a fraction of a second ($O(1)$ complexity). 
 
-### 2. Amazon EMR Serverless Computing Mechanics
-In self-managed EMR clusters on EC2, when a Spark job completes, the virtual servers remain active, consuming idle costs unless manually scaled down.
-**Amazon EMR Serverless** abstracts the EC2 instances. Under the hood, it provisions execution containers on-demand. When the Spark job initiates:
-* Compute containers are allocated based on pre-defined job limits.
-* Once the job finishes, containers are instantly destroyed.
-This eliminates resource idle time and lowers data processing operational overhead by 40%.
+### 2. SnapMirror Block-Level Logical Replication
+Unlike standard file-copy utilities that scan directories and transfer complete files, **ONTAP SnapMirror** replicates at the block level.
+1. During initialization, it performs a baseline transfer of active blocks.
+2. For subsequent updates, it identifies changed blocks between snapshots and transfers *only the modified disk blocks* asynchronously to the secondary region.
+This block-level incremental sync saves network bandwidth and guarantees a very low Recovery Point Objective (RPO).
 
-### 3. Explainable Machine Learning (SHAP Values) in Production
-Deep neural networks or gradient-boosted trees (XGBoost) output a probability score (e.g., $92\%$ fraud probability) but act as "black boxes." SagesMaker runs **SHAP (SHapley Additive exPlanations)** values, which are rooted in cooperative game theory. 
-SHAP assigns each feature an importance value for a specific prediction:
-
-$$\phi_i(f, x) = \sum_{S \subseteq F \setminus \{i\}} \frac{|S|!(|F| - |S| - 1)!}{|F|!} \Big( f(S \cup \{i\}) - f(S) \Big)$$
-
-This math quantifies the exact contribution of each feature (e.g., `Shared IP Address` contributed $+20\%$, `Time of Claim` contributed $+10\%$) to the final score, giving human investigators a legally-sound, transparent explanation.
+### 3. NetApp FlexClone Zero-Copy Writable Volumes
+In standard setups, a developer or tester who wants a copy of the database must copy the entire data volume.
+**NetApp FlexClone** allows creation of a writable volume from any existing snapshot instantly. The clone shares the exact same physical block storage pointers with the parent volume.
+* **No physical copying:** The clone creation is instantaneous (seconds), regardless of volume size.
+* **Storage efficiency:** The clone only consumes storage space for *new blocks* written after the clone is created (Copy-on-Write metadata tracking).
+This enables S&P Global to run non-disruptive DR drills and database testing cycles continuously.
 
 | Challenge | Solution | Key Learning |
 | :--- | :--- | :--- |
-| **Managing Spark clusters** | Replaced self-managed EC2 clusters with **Amazon EMR Serverless**. | Serverless Spark scales compute resources automatically, eliminating idle costs and reducing admin tasks. |
-| **Data consistency on S3** | Adopted the **Apache Iceberg** table format on S3. | Iceberg enables reliable concurrent writes and snapshot isolation, turning S3 into a powerful data lakehouse. |
-| **Detecting network fraud** | Integrated **Neo4j graph database** into the pipeline. | Graphs are superior to relational tables when querying complex, multi-degree relationships. |
-| **Black-box ML predictions** | Integrated **SHAP values** into the ML inference step. | Explainable AI is crucial at trust boundaries, helping fraud investigators understand model decisions. |
+| **High RTO on multi-TB databases** | Incremental block-level replication using **SnapMirror**. | Only replication of modified disk blocks is sent, avoiding full file transfers. |
+| **Disruptive DR testing** | Used **FlexClone** to spin up instant database clones in the DR region. | Clones point to the original snapshot blocks and only write new changes, requiring zero data duplication. |
+| **Testing without interrupting sync** | FlexClone creates clones while SnapMirror continues syncing in the background. | Decoupling replication streams from testing processes allows continuous data protection. |
+| **High storage costs for copies** | Deduplication and compression features of FSx ONTAP. | Thin-provisioning and zero-copy cloning keep storage overhead minimal. |
 
 ---
 
 ## 💡 Reflection & Internship Lessons
 
-This architecture case study was a masterclass in modern data engineering for me.
+As a cloud student, this case study completely transformed my perspective on cloud storage.
 
-Here are the key takeaways from my perspective:
-1. **Serverless Big Data is the Future:** I used to think running Apache Spark required hours of cluster configuration, choosing EC2 instance types, and managing node scaling. EMR Serverless shows that you can run massive Spark jobs instantly with zero management overhead.
-2. **Iceberg is Transforming Storage:** Learning how Apache Iceberg brings database-like features (ACID, schema evolution, time travel) to object storage (S3) has changed my view of data lakes.
-3. **AI Needs Human Trust:** This was my favorite part of the blog. It's not enough to build a highly accurate ML model; we must build *explainable* models. Using SHAP values to explain the "why" behind the "what" is a critical requirement for real-world AI deployment.
+Here are the key lessons I took away:
+1. **Zero-Copy is a Game Changer:** The idea that you can "clone" a 10-terabyte database in 3 seconds without copying a single byte of data is mind-blowing. NetApp's pointer-based metadata mapping is an absolute work of art.
+2. **DR Testing Must Be Continuous:** A disaster recovery plan is useless if you can't test it. S&P Global can spin up clones, run tests, and tear them down in minutes without affecting production replication.
+3. **Managed Services Make Complex Tech Easy:** NetApp ONTAP is notoriously complex to manage on-premises. Having it fully managed as Amazon FSx allows developers to focus on architecture rather than hardware maintenance.
 
-Getting to study such advanced architectures makes me incredibly eager to experiment with AWS Glue, EMR, and SageMaker during my **AWS First Cloud AI Journey**. It shows that with AWS, even a student can build enterprise-grade data platforms!
+This case study inspires me to think about storage not just as a place to put files, but as a dynamic component that can accelerate software delivery and protect critical business operations. I'm so proud to be learning AWS at a time when such powerful tools are available at our fingertips!
 
 ---
 
 ## 🔗 References
-* [Original AWS Architecture Blog: How MAPFRE USA modernized fraud claims with Amazon EMR Serverless](https://aws.amazon.com/blogs/architecture/how-mapfre-usa-modernized-fraud-claims-with-amazon-emr-serverless/)
-* [Amazon EMR Serverless User Guide](https://docs.aws.amazon.com/emr/latest/EMR-Serverless-User-Guide/emr-serverless.html)
-* [Apache Iceberg Documentation](https://iceberg.apache.org/)
+* [Original AWS Architecture Blog: S&P Global’s innovative disaster recovery strategy using Amazon FSx for NetApp ONTAP snapshots](https://aws.amazon.com/blogs/architecture/sp-globals-innovative-disaster-recovery-strategy-using-amazon-fsx-for-netapp-ontap-snapshots/)
+* [What is Amazon FSx for NetApp ONTAP?](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/what-is-fsx-ontap.html)
